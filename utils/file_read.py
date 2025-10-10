@@ -1,10 +1,17 @@
 import os, time, glob, re
 from datetime import datetime
+import pytz
+from config import TIMEZONE
 
 def time2stamp(Time):
     name = "%d_%02d_%02d_%02d_%02d_%02d_%03d"%(Time[0],Time[1],Time[2],Time[3],Time[4],Time[5],Time[6])
+    # Parse as configured timezone
+    china_tz = pytz.timezone(TIMEZONE)
     datetime_obj = datetime.strptime(name, "%Y_%m_%d_%H_%M_%S_%f")
-    timeStamp = int(time.mktime(datetime_obj.timetuple()) * 1000.0 + datetime_obj.microsecond / 1000.0)
+    # Localize to configured timezone
+    datetime_obj = china_tz.localize(datetime_obj)
+    # Convert to UTC timestamp
+    timeStamp = int(datetime_obj.timestamp() * 1000.0 + datetime_obj.microsecond / 1000.0)
     return timeStamp, name
 
 def update_time(Time, t):

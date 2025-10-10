@@ -1,7 +1,13 @@
 from flask import Flask, render_template, send_from_directory
 import os
+import pytz
+from datetime import datetime
+from config import FLASK_CONFIG
 
 app = Flask(__name__)
+
+# Set timezone to China (Asia/Shanghai)
+app.config['TIMEZONE'] = FLASK_CONFIG['TIMEZONE']
 
 @app.route('/')
 def index():
@@ -26,4 +32,5 @@ if __name__ == '__main__':
     
     print("Starting Flask server...")
     print("Open http://localhost:5000 in your browser")
-    app.run(debug=True, host='0.0.0.0', port=5000)
+    print(f"Timezone: {FLASK_CONFIG['TIMEZONE']}")
+    app.run(debug=FLASK_CONFIG['DEBUG'], host=FLASK_CONFIG['HOST'], port=FLASK_CONFIG['PORT'])

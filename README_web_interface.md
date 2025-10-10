@@ -2,6 +2,8 @@
 
 This Flask web application provides an interactive interface for viewing vessel tracking results with click-to-toggle AIS information display.
 
+**Timezone Configuration**: The system is configured to use China Standard Time (Asia/Shanghai, UTC+8).
+
 ## Setup Instructions
 
 ### 1. Export Bounding Box Data
@@ -17,11 +19,13 @@ This will:
 - Generate `result/result.mp4` (processed video)
 - Generate `result/bbox_data.json` (bounding box data for each frame)
 
-### 2. Install Flask (if not already installed)
+### 2. Install Dependencies
 
 ```bash
-pip install Flask
+pip install -r requirements.txt
 ```
+
+This will install Flask, pytz, and all other required dependencies including timezone support.
 
 ### 3. Run the Web Application
 
