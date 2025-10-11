@@ -5,9 +5,22 @@ class VesselTracker {
         this.canvas = document.getElementById('overlay');
         this.ctx = this.canvas.getContext('2d');
         this.visibility = {}; // Track visibility state for each vessel ID
+        this.expanded = {}; // Track expanded state for each vessel ID (more/hide button)
         this.currentFrame = 0;
         this.originalSize = [1920, 1080];
         this.displaySize = [500, 281];
+        
+        // Configurable parameters for info box positioning and sizing
+        this.infoBoxParams = {
+            width: 80,           // Width of the info box in pixels
+            offsetFromBottom: 10, // Distance from bottom of vessel box to info box
+            buttonWidth: 40,      // Width of more/hide button
+            buttonHeight: 16,     // Height of more/hide button
+            textPadding: 1,       // Padding around text
+            lineHeight: 8,       // Height between text lines
+            verticalOffset: -40,  // Adjust info box position upward (negative = up, positive = down)
+            horizontalSpacing: 10 // Minimum spacing between boxes to prevent overlap
+        };
         
         this.init();
     }
@@ -119,8 +132,45 @@ class VesselTracker {
         const originalX = clickX * scaleX;
         const originalY = clickY * scaleY;
         
-        // Hit test against current frame's bounding boxes
+        // First check for clicks on more/hide buttons in visible AIS info panels
         const frame = this.bboxData.frames[this.currentFrame];
+        const visibleBoxes = frame.boxes.filter(box => this.visibility[box.id]);
+        const adjustedBoxes = this.adjustBoxPositions(visibleBoxes, 
+            this.displaySize[0] / this.originalSize[0], 
+            this.displaySize[1] / this.originalSize[1]);
+            
+        for (const box of frame.boxes) {
+            if (this.visibility[box.id] && box.has_ais && box.ais_data && box.inf_box) {
+                const adjustedPos = adjustedBoxes[box.id];
+                if (!adjustedPos) continue;
+                
+                const finalX1 = adjustedPos.x;
+                const finalY1 = adjustedPos.y;
+                const finalX2 = finalX1 + this.infoBoxParams.width;
+                const finalY2 = finalY1 + adjustedPos.height;
+                
+                // Check if click is within info panel
+                if (finalX1 <= clickX && clickX <= finalX2 && finalY1 <= clickY && clickY <= finalY2) {
+                    // Calculate button position (centered below MMSI, ensure it fits within box)
+                    const lineHeight = this.infoBoxParams.lineHeight;
+                    const textPadding = this.infoBoxParams.textPadding;
+                    const buttonWidth = Math.min(this.infoBoxParams.buttonWidth, this.infoBoxParams.width - (textPadding * 2));
+                    const buttonHeight = this.infoBoxParams.buttonHeight;
+                    
+                    // Button centered below MMSI text, within box boundaries
+                    const buttonX = finalX1 + textPadding + (this.infoBoxParams.width - (textPadding * 2) - buttonWidth) / 2;
+                    const buttonY = finalY1 + textPadding + lineHeight + 4;
+                    
+                    if (clickX >= buttonX && clickX <= buttonX + buttonWidth && 
+                        clickY >= buttonY && clickY <= buttonY + buttonHeight) {
+                        this.toggleExpanded(box.id);
+                        return;
+                    }
+                }
+            }
+        }
+        
+        // Hit test against current frame's bounding boxes
         let hit = null;
         let bestArea = null;
         
@@ -137,13 +187,6 @@ class VesselTracker {
         
         if (hit) {
             this.toggleVisibility(hit.id);
-            console.log(`Toggled visibility for vessel ID: ${hit.id}`);
-        } else {
-            console.log(`Click at (${originalX}, ${originalY}) - no vessel hit`);
-            console.log(`Current frame: ${this.currentFrame}, Available boxes:`, frame.boxes.length);
-            if (frame.boxes.length > 0) {
-                console.log('Available vessel boxes:', frame.boxes.map(b => ({id: b.id, box: b.box})));
-            }
         }
     }
     
@@ -152,11 +195,17 @@ class VesselTracker {
         this.drawCurrentFrame();
     }
     
+    toggleExpanded(vesselId) {
+        this.expanded[vesselId] = !this.expanded[vesselId];
+        this.drawCurrentFrame();
+    }
+    
     showAllVessels() {
         if (!this.bboxData || !this.bboxData.frames[this.currentFrame]) return;
         
         for (const box of this.bboxData.frames[this.currentFrame].boxes) {
             this.visibility[box.id] = true;
+            // Preserve expanded state - don't reset it
         }
         this.drawCurrentFrame();
     }
@@ -166,6 +215,7 @@ class VesselTracker {
         
         for (const box of this.bboxData.frames[this.currentFrame].boxes) {
             this.visibility[box.id] = false;
+            // Preserve expanded state - don't reset it
         }
         this.drawCurrentFrame();
     }
@@ -180,26 +230,87 @@ class VesselTracker {
         const scaleX = this.displaySize[0] / this.originalSize[0];
         const scaleY = this.displaySize[1] / this.originalSize[1];
         
+        // Get visible boxes and adjust their positions to prevent overlap
+        const visibleBoxes = frame.boxes.filter(box => this.visibility[box.id]);
+        const adjustedBoxes = this.adjustBoxPositions(visibleBoxes, scaleX, scaleY);
+        
         for (const box of frame.boxes) {
-            this.drawVesselBox(box, scaleX, scaleY);
+            this.drawVesselBox(box, scaleX, scaleY, adjustedBoxes);
         }
     }
     
-    drawVesselBox(box, scaleX, scaleY) {
+    adjustBoxPositions(boxes, scaleX, scaleY) {
+        const adjustedPositions = {};
+        const spacing = this.infoBoxParams.horizontalSpacing;
+        
+        for (let i = 0; i < boxes.length; i++) {
+            const box = boxes[i];
+            if (!this.visibility[box.id] || !box.inf_box) continue;
+            
+            const [infX1, infY1, infX2, infY2] = box.inf_box;
+            const scaledInfX1 = infX1 * scaleX;
+            const scaledInfY1 = infY1 * scaleY + this.infoBoxParams.verticalOffset;
+            
+            // Calculate dynamic height
+            const isExpanded = this.expanded[box.id] || false;
+            const lineHeight = this.infoBoxParams.lineHeight;
+            const textPadding = this.infoBoxParams.textPadding;
+            const buttonHeight = this.infoBoxParams.buttonHeight;
+            
+            let contentHeight = textPadding + lineHeight + 4 + buttonHeight;
+            if (isExpanded) {
+                contentHeight += 8 + (lineHeight * 4);
+            }
+            contentHeight += textPadding;
+            
+            let adjustedX = scaledInfX1;
+            
+            // Check for overlaps with previously positioned boxes
+            for (let j = 0; j < i; j++) {
+                const prevBox = boxes[j];
+                if (!this.visibility[prevBox.id] || !prevBox.inf_box) continue;
+                
+                const prevAdjusted = adjustedPositions[prevBox.id];
+                if (!prevAdjusted) continue;
+                
+                // Check if boxes would overlap horizontally
+                const boxRight = adjustedX + this.infoBoxParams.width;
+                const prevBoxRight = prevAdjusted.x + this.infoBoxParams.width;
+                
+                if (adjustedX < prevBoxRight + spacing && boxRight > prevAdjusted.x - spacing) {
+                    // Move this box to the right of the previous one
+                    adjustedX = prevBoxRight + spacing;
+                }
+            }
+            
+            adjustedPositions[box.id] = {
+                x: adjustedX,
+                y: scaledInfY1,
+                height: contentHeight
+            };
+        }
+        
+        return adjustedPositions;
+    }
+    
+    drawVesselBox(box, scaleX, scaleY, adjustedBoxes = null) {
         const [x1, y1, x2, y2] = box.box;
         const scaledX1 = x1 * scaleX;
         const scaledY1 = y1 * scaleY;
         const scaledX2 = x2 * scaleX;
         const scaledY2 = y2 * scaleY;
         
+        // Override color to blue for web interface
+        const blueColor = [0, 100, 200]; // RGB values for blue
+        
         // Draw bounding box (corner style like in draw.py)
-        this.drawCornerBox(scaledX1, scaledY1, scaledX2, scaledY2, box.color);
+        this.drawCornerBox(scaledX1, scaledY1, scaledX2, scaledY2, blueColor);
         
         // Draw AIS info if visible
         if (this.visibility[box.id] && box.has_ais && box.ais_data && box.inf_box) {
-            this.drawAisInfo(box, scaleX, scaleY);
+            this.drawAisInfo(box, scaleX, scaleY, blueColor, adjustedBoxes);
         } else if (this.visibility[box.id] && !box.has_ais && box.inf_box) {
-            this.drawNoAisInfo(box, scaleX, scaleY);
+            this.drawNoAisInfo(box, scaleX, scaleY, blueColor, adjustedBoxes);
         }
     }
     
@@ -243,23 +354,45 @@ class VesselTracker {
         this.ctx.stroke();
     }
     
-    drawAisInfo(box, scaleX, scaleY) {
+    drawAisInfo(box, scaleX, scaleY, color, adjustedBoxes = null) {
         const [infX1, infY1, infX2, infY2] = box.inf_box;
         const scaledInfX1 = infX1 * scaleX;
-        const scaledInfY1 = infY1 * scaleY;
-        const scaledInfX2 = infX2 * scaleX;
-        const scaledInfY2 = infY2 * scaleY;
+        const scaledInfY1 = infY1 * scaleY + this.infoBoxParams.verticalOffset;
+        
+        // Use adjusted position if available
+        const adjustedPos = adjustedBoxes && adjustedBoxes[box.id];
+        const finalX1 = adjustedPos ? adjustedPos.x : scaledInfX1;
+        const finalY1 = adjustedPos ? adjustedPos.y : scaledInfY1;
+        
+        const aisData = box.ais_data;
+        const isExpanded = this.expanded[box.id] || false;
+        
+        // Calculate dynamic box size based on content
+        const lineHeight = this.infoBoxParams.lineHeight;
+        const textPadding = this.infoBoxParams.textPadding;
+        const buttonHeight = this.infoBoxParams.buttonHeight;
+        
+        // Calculate height based on content
+        let contentHeight = textPadding + lineHeight + 4 + buttonHeight; // MMSI + button
+        if (isExpanded) {
+            contentHeight += 8 + (lineHeight * 4); // Gap + 4 additional lines
+        }
+        contentHeight += textPadding; // Bottom padding
+        
+        // Use dynamic width and height
+        const finalX2 = finalX1 + this.infoBoxParams.width;
+        const finalY2 = finalY1 + contentHeight;
         
         // Draw info panel background
-        this.ctx.strokeStyle = `rgb(${box.color[0]}, ${box.color[1]}, ${box.color[2]})`;
+        this.ctx.strokeStyle = `rgb(${color[0]}, ${color[1]}, ${color[2]})`;
         this.ctx.lineWidth = 1;
-        this.ctx.strokeRect(scaledInfX1, scaledInfY1, scaledInfX2 - scaledInfX1, scaledInfY2 - scaledInfY1);
+        this.ctx.strokeRect(finalX1, finalY1, finalX2 - finalX1, finalY2 - finalY1);
         
         // Draw connecting line
         const boxCenterX = (box.box[0] + box.box[2]) / 2 * scaleX;
         const boxBottomY = box.box[3] * scaleY;
-        const infoCenterX = (scaledInfX1 + scaledInfX2) / 2;
-        const infoTopY = scaledInfY1;
+        const infoCenterX = (finalX1 + finalX2) / 2;
+        const infoTopY = finalY1;
         
         this.ctx.beginPath();
         this.ctx.moveTo(boxCenterX, boxBottomY);
@@ -267,41 +400,80 @@ class VesselTracker {
         this.ctx.lineTo(infoCenterX, infoTopY);
         this.ctx.stroke();
         
-        // Draw AIS data text
-        this.ctx.fillStyle = `rgb(${box.color[0]}, ${box.color[1]}, ${box.color[2]})`;
-        this.ctx.font = '12px Arial';
-        const lineHeight = 16;
-        let y = scaledInfY1 + 16;
+        // Draw AIS data text with smaller font
+        this.ctx.fillStyle = `rgb(${color[0]}, ${color[1]}, ${color[2]})`;
+        this.ctx.font = '10px Arial';
+        let y = finalY1 + textPadding + lineHeight;
         
-        const aisData = box.ais_data;
-        this.ctx.fillText(`MMSI: ${aisData.mmsi}`, scaledInfX1 + 4, y);
+        // Always show MMSI
+        this.ctx.fillText(`MMSI: ${aisData.mmsi}`, finalX1 + textPadding, y);
         y += lineHeight;
-        this.ctx.fillText(`SOG: ${aisData.sog}`, scaledInfX1 + 4, y);
-        y += lineHeight;
-        this.ctx.fillText(`COG: ${aisData.cog}`, scaledInfX1 + 4, y);
-        y += lineHeight;
-        this.ctx.fillText(`LAT: ${aisData.lat}`, scaledInfX1 + 4, y);
-        y += lineHeight;
-        this.ctx.fillText(`LON: ${aisData.lon}`, scaledInfX1 + 4, y);
+        
+        // Draw more/hide button below MMSI (centered, ensure it fits within box)
+        const buttonWidth = Math.min(this.infoBoxParams.buttonWidth, this.infoBoxParams.width - (textPadding * 2));
+        const buttonX = finalX1 + textPadding + (this.infoBoxParams.width - (textPadding * 2) - buttonWidth) / 2;
+        const buttonY = y + 4;
+        
+        // Button background
+        this.ctx.fillStyle = `rgba(${color[0]}, ${color[1]}, ${color[2]}, 0.2)`;
+        this.ctx.fillRect(buttonX, buttonY, buttonWidth, buttonHeight);
+        
+        // Button border
+        this.ctx.strokeStyle = `rgb(${color[0]}, ${color[1]}, ${color[2]})`;
+        this.ctx.lineWidth = 1;
+        this.ctx.strokeRect(buttonX, buttonY, buttonWidth, buttonHeight);
+        
+        // Button text
+        this.ctx.fillStyle = `rgb(${color[0]}, ${color[1]}, ${color[2]})`;
+        this.ctx.font = '8px Arial';
+        this.ctx.textAlign = 'center';
+        const buttonText = isExpanded ? 'Hide' : 'More';
+        this.ctx.fillText(buttonText, buttonX + buttonWidth / 2, buttonY + 10);
+        this.ctx.textAlign = 'left';
+        
+        // Show additional info below button only if expanded
+        if (isExpanded) {
+            y = buttonY + buttonHeight + 8; // Position below button
+            this.ctx.fillStyle = `rgb(${color[0]}, ${color[1]}, ${color[2]})`;
+            this.ctx.font = '10px Arial';
+            this.ctx.fillText(`SOG: ${aisData.sog}`, finalX1 + textPadding, y);
+            y += lineHeight;
+            this.ctx.fillText(`COG: ${aisData.cog}`, finalX1 + textPadding, y);
+            y += lineHeight;
+            this.ctx.fillText(`LAT: ${aisData.lat}`, finalX1 + textPadding, y);
+            y += lineHeight;
+            this.ctx.fillText(`LON: ${aisData.lon}`, finalX1 + textPadding, y);
+        }
     }
     
-    drawNoAisInfo(box, scaleX, scaleY) {
+    drawNoAisInfo(box, scaleX, scaleY, color, adjustedBoxes = null) {
         const [infX1, infY1, infX2, infY2] = box.inf_box;
         const scaledInfX1 = infX1 * scaleX;
-        const scaledInfY1 = infY1 * scaleY;
-        const scaledInfX2 = infX2 * scaleX;
-        const scaledInfY2 = infY2 * scaleY;
+        const scaledInfY1 = infY1 * scaleY + this.infoBoxParams.verticalOffset;
+        
+        // Use adjusted position if available
+        const adjustedPos = adjustedBoxes && adjustedBoxes[box.id];
+        const finalX1 = adjustedPos ? adjustedPos.x : scaledInfX1;
+        const finalY1 = adjustedPos ? adjustedPos.y : scaledInfY1;
+        
+        // Calculate dynamic box size for NO AIS (smaller box)
+        const textPadding = this.infoBoxParams.textPadding;
+        const contentHeight = textPadding + 20 + textPadding; // Text height + padding
+        
+        // Use dynamic width and height
+        const finalX2 = finalX1 + this.infoBoxParams.width;
+        const finalY2 = finalY1 + contentHeight;
         
         // Draw info panel background
-        this.ctx.strokeStyle = `rgb(${box.color[0]}, ${box.color[1]}, ${box.color[2]})`;
+        this.ctx.strokeStyle = `rgb(${color[0]}, ${color[1]}, ${color[2]})`;
         this.ctx.lineWidth = 1;
-        this.ctx.strokeRect(scaledInfX1, scaledInfY1, scaledInfX2 - scaledInfX1, scaledInfY2 - scaledInfY1);
+        this.ctx.strokeRect(finalX1, finalY1, finalX2 - finalX1, finalY2 - finalY1);
         
         // Draw connecting line
         const boxCenterX = (box.box[0] + box.box[2]) / 2 * scaleX;
         const boxBottomY = box.box[3] * scaleY;
-        const infoCenterX = (scaledInfX1 + scaledInfX2) / 2;
-        const infoTopY = scaledInfY1;
+        const infoCenterX = (finalX1 + finalX2) / 2;
+        const infoTopY = finalY1;
         
         this.ctx.beginPath();
         this.ctx.moveTo(boxCenterX, boxBottomY);
@@ -310,10 +482,10 @@ class VesselTracker {
         this.ctx.stroke();
         
         // Draw "NO AIS" text
-        this.ctx.fillStyle = `rgb(${box.color[0]}, ${box.color[1]}, ${box.color[2]})`;
+        this.ctx.fillStyle = `rgb(${color[0]}, ${color[1]}, ${color[2]})`;
         this.ctx.font = 'bold 14px Arial';
         this.ctx.textAlign = 'center';
-        this.ctx.fillText('NO AIS', (scaledInfX1 + scaledInfX2) / 2, (scaledInfY1 + scaledInfY2) / 2 + 5);
+        this.ctx.fillText('NO AIS', (finalX1 + finalX2) / 2, (finalY1 + finalY2) / 2 + 5);
         this.ctx.textAlign = 'left';
     }
     
