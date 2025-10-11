@@ -1,3 +1,5 @@
+<!-- source /mnt/c/users/parv/onedrive/desktop/ip/deep/.venv/bin/activate -->
+
 # Interactive Vessel Tracking Web Interface
 
 This Flask web application provides an interactive interface for viewing vessel tracking results with click-to-toggle AIS information display.
