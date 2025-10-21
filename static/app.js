@@ -9,6 +9,8 @@ class VesselTracker {
         this.currentFrame = 0;
         this.originalSize = [1920, 1080];
         this.displaySize = [500, 281];
+        this.shipLogo = null; // Ship logo image
+        this.logoPositions = {}; // Track logo positions for click detection
         
         // Configurable parameters for info box positioning and sizing
         this.infoBoxParams = {
@@ -28,6 +30,7 @@ class VesselTracker {
     async init() {
         try {
             await this.loadBboxData();
+            await this.loadShipLogo();
             this.setupEventListeners();
             // this.updateStatus('Ready - Click on vessels to toggle AIS info');
         } catch (error) {
@@ -57,6 +60,21 @@ class VesselTracker {
         this.canvas.style.pointerEvents = 'none';
         
         console.log(`Loaded ${this.bboxData.frames.length} frames`);
+    }
+    
+    async loadShipLogo() {
+        return new Promise((resolve, reject) => {
+            this.shipLogo = new Image();
+            this.shipLogo.onload = () => {
+                console.log('Ship logo loaded successfully');
+                resolve();
+            };
+            this.shipLogo.onerror = () => {
+                console.error('Failed to load ship logo');
+                reject(new Error('Failed to load ship logo'));
+            };
+            this.shipLogo.src = '/static/images/ship_logo.png';
+        });
     }
     
     setupEventListeners() {
@@ -170,23 +188,14 @@ class VesselTracker {
             }
         }
         
-        // Hit test against current frame's bounding boxes
-        let hit = null;
-        let bestArea = null;
-        
-        for (const box of frame.boxes) {
-            const [x1, y1, x2, y2] = box.box;
-            if (x1 <= originalX && originalX <= x2 && y1 <= originalY && originalY <= y2) {
-                const area = (x2 - x1) * (y2 - y1);
-                if (hit === null || area < bestArea) {
-                    hit = box;
-                    bestArea = area;
-                }
+        // Hit test against ship logos
+        for (const vesselId in this.logoPositions) {
+            const logoPos = this.logoPositions[vesselId];
+            if (logoPos.x <= clickX && clickX <= logoPos.x + logoPos.width &&
+                logoPos.y <= clickY && clickY <= logoPos.y + logoPos.height) {
+                this.toggleVisibility(vesselId);
+                return;
             }
-        }
-        
-        if (hit) {
-            this.toggleVisibility(hit.id);
         }
     }
     
@@ -225,6 +234,9 @@ class VesselTracker {
         
         // Clear canvas
         this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+        
+        // Clear logo positions for this frame
+        this.logoPositions = {};
         
         const frame = this.bboxData.frames[this.currentFrame];
         const scaleX = this.displaySize[0] / this.originalSize[0];
@@ -306,6 +318,9 @@ class VesselTracker {
         // Draw bounding box (corner style like in draw.py)
         this.drawCornerBox(scaledX1, scaledY1, scaledX2, scaledY2, blueColor);
         
+        // Draw ship logo above the bounding box
+        this.drawShipLogo(box.id, scaledX1, scaledY1, scaledX2, scaledY2);
+        
         // Draw AIS info if visible
         if (this.visibility[box.id] && box.has_ais && box.ais_data && box.inf_box) {
             this.drawAisInfo(box, scaleX, scaleY, blueColor, adjustedBoxes);
@@ -352,6 +367,29 @@ class VesselTracker {
         this.ctx.moveTo(x2, y2);
         this.ctx.lineTo(x2 - cornerLength, y2);
         this.ctx.stroke();
+    }
+    
+    drawShipLogo(vesselId, x1, y1, x2, y2) {
+        if (!this.shipLogo) return;
+        
+        // Logo size and positioning
+        const logoSize = 20;
+        const offset = 5; // Distance above the bounding box
+        
+        // Calculate logo position (centered horizontally above the box)
+        const logoX = (x1 + x2) / 2 - logoSize / 2;
+        const logoY = y1 - logoSize - offset;
+        
+        // Store logo position for click detection
+        this.logoPositions[vesselId] = {
+            x: logoX,
+            y: logoY,
+            width: logoSize,
+            height: logoSize
+        };
+        
+        // Draw the ship logo
+        this.ctx.drawImage(this.shipLogo, logoX, logoY, logoSize, logoSize);
     }
     
     drawAisInfo(box, scaleX, scaleY, color, adjustedBoxes = null) {
