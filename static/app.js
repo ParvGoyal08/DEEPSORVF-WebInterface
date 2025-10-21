@@ -29,9 +29,9 @@ class VesselTracker {
         try {
             await this.loadBboxData();
             this.setupEventListeners();
-            this.updateStatus('Ready - Click on vessels to toggle AIS info');
+            // this.updateStatus('Ready - Click on vessels to toggle AIS info');
         } catch (error) {
-            this.updateStatus('Error loading data: ' + error.message);
+            // this.updateStatus('Error loading data: ' + error.message);
             console.error('Initialization error:', error);
         }
     }
@@ -106,11 +106,11 @@ class VesselTracker {
     }
     
     updateFrameInfo() {
-        const frame = this.bboxData.frames[this.currentFrame];
-        if (frame) {
-            document.getElementById('frame-info').textContent = this.currentFrame;
-            document.getElementById('time-info').textContent = this.formatTime(this.video.currentTime);
-        }
+        // const frame = this.bboxData.frames[this.currentFrame];
+        // if (frame) {
+        //     document.getElementById('frame-info').textContent = this.currentFrame;
+        //     document.getElementById('time-info').textContent = this.formatTime(this.video.currentTime);
+        // }
     }
     
     formatTime(seconds) {
@@ -489,9 +489,9 @@ class VesselTracker {
         this.ctx.textAlign = 'left';
     }
     
-    updateStatus(message) {
-        document.getElementById('status').textContent = message;
-    }
+    // updateStatus(message) {
+    //     document.getElementById('status').textContent = message;
+    // }
 }
 
 // Initialize the application when the page loads
