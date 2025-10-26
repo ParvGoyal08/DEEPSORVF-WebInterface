@@ -254,50 +254,72 @@ class VesselTracker {
     adjustBoxPositions(boxes, scaleX, scaleY) {
         const adjustedPositions = {};
         const spacing = this.infoBoxParams.horizontalSpacing;
+        const logoSize = 20;
+        const offset = 5;
+        const gap = 5;
         
         for (let i = 0; i < boxes.length; i++) {
             const box = boxes[i];
-            if (!this.visibility[box.id] || !box.inf_box) continue;
+            if (!this.visibility[box.id]) continue;
             
-            const [infX1, infY1, infX2, infY2] = box.inf_box;
-            const scaledInfX1 = infX1 * scaleX;
-            const scaledInfY1 = infY1 * scaleY + this.infoBoxParams.verticalOffset;
+            // Calculate logo position (centered horizontally above the box)
+            const [x1, y1, x2, y2] = box.box;
+            const scaledX1 = x1 * scaleX;
+            const scaledY1 = y1 * scaleY;
+            const scaledX2 = x2 * scaleX;
+            const scaledY2 = y2 * scaleY;
             
-            // Calculate dynamic height
-            const isExpanded = this.expanded[box.id] || false;
-            const lineHeight = this.infoBoxParams.lineHeight;
-            const textPadding = this.infoBoxParams.textPadding;
-            const buttonHeight = this.infoBoxParams.buttonHeight;
+            const logoX = (scaledX1 + scaledX2) / 2 - logoSize / 2;
+            const logoY = scaledY1 - logoSize - offset;
             
-            let contentHeight = textPadding + lineHeight + 4 + buttonHeight;
-            if (isExpanded) {
-                contentHeight += 8 + (lineHeight * 4);
+            // Position info box below the ship logo, centered horizontally with bounding box
+            const boxCenterX = (scaledX1 + scaledX2) / 2;
+            const adjustedX = boxCenterX - this.infoBoxParams.width / 2;
+            const adjustedY = logoY + logoSize + gap;
+            
+            // Calculate dynamic height based on AIS status
+            let contentHeight;
+            if (box.has_ais && box.ais_data) {
+                // Has AIS data - calculate height based on expanded state
+                const isExpanded = this.expanded[box.id] || false;
+                const lineHeight = this.infoBoxParams.lineHeight;
+                const textPadding = this.infoBoxParams.textPadding;
+                const buttonHeight = this.infoBoxParams.buttonHeight;
+                
+                contentHeight = textPadding + lineHeight + 4 + buttonHeight;
+                if (isExpanded) {
+                    contentHeight += 8 + (lineHeight * 4);
+                }
+                contentHeight += textPadding;
+            } else {
+                // No AIS data - smaller box
+                const textPadding = this.infoBoxParams.textPadding;
+                contentHeight = textPadding + 20 + textPadding;
             }
-            contentHeight += textPadding;
             
-            let adjustedX = scaledInfX1;
+            let finalX = adjustedX;
             
             // Check for overlaps with previously positioned boxes
             for (let j = 0; j < i; j++) {
                 const prevBox = boxes[j];
-                if (!this.visibility[prevBox.id] || !prevBox.inf_box) continue;
+                if (!this.visibility[prevBox.id]) continue;
                 
                 const prevAdjusted = adjustedPositions[prevBox.id];
                 if (!prevAdjusted) continue;
                 
                 // Check if boxes would overlap horizontally
-                const boxRight = adjustedX + this.infoBoxParams.width;
+                const boxRight = finalX + this.infoBoxParams.width;
                 const prevBoxRight = prevAdjusted.x + this.infoBoxParams.width;
                 
-                if (adjustedX < prevBoxRight + spacing && boxRight > prevAdjusted.x - spacing) {
+                if (finalX < prevBoxRight + spacing && boxRight > prevAdjusted.x - spacing) {
                     // Move this box to the right of the previous one
-                    adjustedX = prevBoxRight + spacing;
+                    finalX = prevBoxRight + spacing;
                 }
             }
             
             adjustedPositions[box.id] = {
-                x: adjustedX,
-                y: scaledInfY1,
+                x: finalX,
+                y: adjustedY,
                 height: contentHeight
             };
         }
@@ -393,14 +415,12 @@ class VesselTracker {
     }
     
     drawAisInfo(box, scaleX, scaleY, color, adjustedBoxes = null) {
-        const [infX1, infY1, infX2, infY2] = box.inf_box;
-        const scaledInfX1 = infX1 * scaleX;
-        const scaledInfY1 = infY1 * scaleY + this.infoBoxParams.verticalOffset;
-        
-        // Use adjusted position if available
+        // Use adjusted position from adjustBoxPositions
         const adjustedPos = adjustedBoxes && adjustedBoxes[box.id];
-        const finalX1 = adjustedPos ? adjustedPos.x : scaledInfX1;
-        const finalY1 = adjustedPos ? adjustedPos.y : scaledInfY1;
+        if (!adjustedPos) return;
+        
+        const finalX1 = adjustedPos.x;
+        const finalY1 = adjustedPos.y;
         
         const aisData = box.ais_data;
         const isExpanded = this.expanded[box.id] || false;
@@ -410,33 +430,14 @@ class VesselTracker {
         const textPadding = this.infoBoxParams.textPadding;
         const buttonHeight = this.infoBoxParams.buttonHeight;
         
-        // Calculate height based on content
-        let contentHeight = textPadding + lineHeight + 4 + buttonHeight; // MMSI + button
-        if (isExpanded) {
-            contentHeight += 8 + (lineHeight * 4); // Gap + 4 additional lines
-        }
-        contentHeight += textPadding; // Bottom padding
-        
         // Use dynamic width and height
         const finalX2 = finalX1 + this.infoBoxParams.width;
-        const finalY2 = finalY1 + contentHeight;
+        const finalY2 = finalY1 + adjustedPos.height;
         
         // Draw info panel background
         this.ctx.strokeStyle = `rgb(${color[0]}, ${color[1]}, ${color[2]})`;
         this.ctx.lineWidth = 1;
         this.ctx.strokeRect(finalX1, finalY1, finalX2 - finalX1, finalY2 - finalY1);
-        
-        // Draw connecting line
-        const boxCenterX = (box.box[0] + box.box[2]) / 2 * scaleX;
-        const boxBottomY = box.box[3] * scaleY;
-        const infoCenterX = (finalX1 + finalX2) / 2;
-        const infoTopY = finalY1;
-        
-        this.ctx.beginPath();
-        this.ctx.moveTo(boxCenterX, boxBottomY);
-        this.ctx.lineTo(boxCenterX, infoTopY);
-        this.ctx.lineTo(infoCenterX, infoTopY);
-        this.ctx.stroke();
         
         // Draw AIS data text with smaller font
         this.ctx.fillStyle = `rgb(${color[0]}, ${color[1]}, ${color[2]})`;
@@ -485,14 +486,12 @@ class VesselTracker {
     }
     
     drawNoAisInfo(box, scaleX, scaleY, color, adjustedBoxes = null) {
-        const [infX1, infY1, infX2, infY2] = box.inf_box;
-        const scaledInfX1 = infX1 * scaleX;
-        const scaledInfY1 = infY1 * scaleY + this.infoBoxParams.verticalOffset;
-        
-        // Use adjusted position if available
+        // Use adjusted position from adjustBoxPositions
         const adjustedPos = adjustedBoxes && adjustedBoxes[box.id];
-        const finalX1 = adjustedPos ? adjustedPos.x : scaledInfX1;
-        const finalY1 = adjustedPos ? adjustedPos.y : scaledInfY1;
+        if (!adjustedPos) return;
+        
+        const finalX1 = adjustedPos.x;
+        const finalY1 = adjustedPos.y;
         
         // Calculate dynamic box size for NO AIS (smaller box)
         const textPadding = this.infoBoxParams.textPadding;
@@ -506,18 +505,6 @@ class VesselTracker {
         this.ctx.strokeStyle = `rgb(${color[0]}, ${color[1]}, ${color[2]})`;
         this.ctx.lineWidth = 1;
         this.ctx.strokeRect(finalX1, finalY1, finalX2 - finalX1, finalY2 - finalY1);
-        
-        // Draw connecting line
-        const boxCenterX = (box.box[0] + box.box[2]) / 2 * scaleX;
-        const boxBottomY = box.box[3] * scaleY;
-        const infoCenterX = (finalX1 + finalX2) / 2;
-        const infoTopY = finalY1;
-        
-        this.ctx.beginPath();
-        this.ctx.moveTo(boxCenterX, boxBottomY);
-        this.ctx.lineTo(boxCenterX, infoTopY);
-        this.ctx.lineTo(infoCenterX, infoTopY);
-        this.ctx.stroke();
         
         // Draw "NO AIS" text
         this.ctx.fillStyle = `rgb(${color[0]}, ${color[1]}, ${color[2]})`;
