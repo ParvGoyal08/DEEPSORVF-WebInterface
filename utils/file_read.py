@@ -37,8 +37,11 @@ def read_all(path, result_path):
     
     os.makedirs(result_path, exist_ok=True)
     
-    result_video = result_path+'video/'+path.split('/')[-2]+'.'+v_p[-1]
-    result_metric = result_path+'metric/'+path.split('/')[-2]+'.txt'
+    # Generate web-compatible video filename with -web suffix
+    # Use same logic as original but add -web before extension
+    clip_name = path.split('/')[-2] if path.endswith('/') else path.split('/')[-1]
+    result_video = result_path+'video/'+clip_name+'-web.'+v_p[-1]
+    result_metric = result_path+'metric/'+clip_name+'.txt'
     
     os.makedirs(result_path+'video/', exist_ok=True)
     os.makedirs(result_path+'metric/', exist_ok=True)

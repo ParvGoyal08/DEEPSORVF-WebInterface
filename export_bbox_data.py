@@ -11,6 +11,17 @@ from utils.gen_result import gen_result
 import imageio
 from utils.draw import DRAW
 
+# Try to import imageio-ffmpeg for better H.264 support
+# This package provides ffmpeg binaries for reliable H.264 encoding
+try:
+    import imageio_ffmpeg  # noqa: F401
+    FFMPEG_AVAILABLE = True
+except ImportError:
+    FFMPEG_AVAILABLE = False
+    print("Warning: imageio-ffmpeg not found. Install it for better H.264 encoding:")
+    print("  pip install imageio-ffmpeg")
+    print("  (ffmpeg may still work if installed system-wide)")
+
 
 def export_bbox_data(arg):
     """Export bounding box data to JSON for web interface"""
@@ -33,6 +44,7 @@ def export_bbox_data(arg):
     
     show_size = 500
     videoWriter = None
+    video_writer_imageio = None  # For H.264 encoding with imageio
     bin_inf = pd.DataFrame(columns=['ID', 'mmsi', 'timestamp', 'match'])
 
     # Data structure for JSON export
@@ -123,12 +135,43 @@ def export_bbox_data(arg):
 
         # Process and save video frame
         result = imutils.resize(im, height=show_size)
-        if videoWriter is None:
-            fourcc = cv2.VideoWriter_fourcc('m', 'p', '4', 'v')
-            videoWriter = cv2.VideoWriter(
-                arg.result_video, fourcc, fps, (result.shape[1], result.shape[0]))
-
-        videoWriter.write(result)
+        
+        # Initialize H.264 video writer using imageio (web-compatible)
+        if video_writer_imageio is None:
+            # Use imageio with H.264 codec for web compatibility
+            # imageio uses ffmpeg which provides reliable H.264 encoding
+            try:
+                video_writer_imageio = imageio.get_writer(
+                    arg.result_video,
+                    fps=fps,
+                    codec='libx264',  # H.264 codec
+                    quality=8,  # Quality setting (0-10, higher is better)
+                    pixelformat='yuv420p',  # Ensures web compatibility
+                    macro_block_size=None  # Let ffmpeg choose optimal block size
+                )
+                print(f"Initialized H.264 video writer: {arg.result_video}")
+            except Exception as e:
+                print(f"Error initializing imageio writer: {e}")
+                print("Falling back to OpenCV VideoWriter with H.264 codec...")
+                # Fallback to OpenCV with H.264 codec
+                fourcc = cv2.VideoWriter_fourcc(*'H264')
+                videoWriter = cv2.VideoWriter(
+                    arg.result_video, fourcc, fps, (result.shape[1], result.shape[0]))
+                if not videoWriter.isOpened():
+                    # If H.264 fails, try avc1 (alternative H.264 fourcc)
+                    print("H264 codec failed, trying avc1...")
+                    fourcc = cv2.VideoWriter_fourcc(*'avc1')
+                    videoWriter = cv2.VideoWriter(
+                        arg.result_video, fourcc, fps, (result.shape[1], result.shape[0]))
+        
+        # Write frame
+        if video_writer_imageio is not None:
+            # Convert BGR to RGB for imageio (imageio expects RGB format)
+            result_rgb = cv2.cvtColor(result, cv2.COLOR_BGR2RGB)
+            video_writer_imageio.append_data(result_rgb)
+        elif videoWriter is not None:
+            videoWriter.write(result)
+        
         frame_count += 1
 
     # Save bounding box data to JSON
@@ -140,7 +183,10 @@ def export_bbox_data(arg):
     print(f"Video saved to {arg.result_video}")
     
     cap.release()
-    videoWriter.release()
+    if video_writer_imageio is not None:
+        video_writer_imageio.close()
+    if videoWriter is not None:
+        videoWriter.release()
     cv2.destroyAllWindows()
 
 
