@@ -8,18 +8,19 @@ class VesselTracker {
         this.expanded = {}; // Track expanded state for each vessel ID (more/hide button)
         this.currentFrame = 0;
         this.originalSize = [1920, 1080];
-        this.displaySize = [500, 281];
+        this.displaySize = [500, 281]; // Will be updated when video loads
+        this.baseDisplaySize = [500, 281]; // Original display size from JSON
         this.shipLogo = null; // Ship logo image
         this.logoPositions = {}; // Track logo positions for click detection
         
         // Configurable parameters for info box positioning and sizing
         this.infoBoxParams = {
-            width: 80,           // Width of the info box in pixels
+            width: 120,          // Width of the info box in pixels (increased for text)
             offsetFromBottom: 10, // Distance from bottom of vessel box to info box
-            buttonWidth: 40,      // Width of more/hide button
-            buttonHeight: 16,     // Height of more/hide button
-            textPadding: 1,       // Padding around text
-            lineHeight: 8,       // Height between text lines
+            buttonWidth: 50,      // Width of more/hide button (increased)
+            buttonHeight: 20,     // Height of more/hide button (increased)
+            textPadding: 5,       // Padding around text (increased)
+            lineHeight: 17,       // Height between text lines (increased for 13px font)
             verticalOffset: -40,  // Adjust info box position upward (negative = up, positive = down)
             horizontalSpacing: 10 // Minimum spacing between boxes to prevent overlap
         };
@@ -46,15 +47,13 @@ class VesselTracker {
         }
         this.bboxData = await response.json();
         this.originalSize = this.bboxData.original_size;
-        this.displaySize = this.bboxData.display_size;
+        // Store the original display size from JSON, but we'll update it based on actual video size
+        this.baseDisplaySize = this.bboxData.display_size;
         
-        // Update canvas size to match video display size
-        this.canvas.width = this.displaySize[0];
-        this.canvas.height = this.displaySize[1];
-        
-        // Set canvas CSS size to match video element
-        this.canvas.style.width = this.displaySize[0] + 'px';
-        this.canvas.style.height = this.displaySize[1] + 'px';
+        // Wait for video to load metadata to get actual display size
+        if (this.video.readyState >= 1) {
+            this.syncCanvasSize();
+        }
         
         // Initially disable canvas interaction (video starts paused)
         this.canvas.style.pointerEvents = 'none';
@@ -94,6 +93,23 @@ class VesselTracker {
             console.log('Canvas disabled - video controls active');
         });
         
+        // Handle video load events to keep canvas in sync
+        this.video.addEventListener('loadedmetadata', () => {
+            // Small delay to ensure video element has rendered
+            setTimeout(() => this.syncCanvasSize(), 100);
+        });
+        
+        this.video.addEventListener('loadeddata', () => {
+            setTimeout(() => this.syncCanvasSize(), 100);
+        });
+        
+        // Handle window resize
+        let resizeTimeout;
+        window.addEventListener('resize', () => {
+            clearTimeout(resizeTimeout);
+            resizeTimeout = setTimeout(() => this.syncCanvasSize(), 100);
+        });
+        
         // Canvas click handling
         this.canvas.addEventListener('click', (event) => {
             this.handleCanvasClick(event);
@@ -107,6 +123,44 @@ class VesselTracker {
         document.getElementById('hide-all').addEventListener('click', () => {
             this.hideAllVessels();
         });
+    }
+    
+    syncCanvasSize() {
+        // Sync canvas size with actual video display size
+        const videoRect = this.video.getBoundingClientRect();
+        if (videoRect.width > 0 && videoRect.height > 0) {
+            // Get the actual video element dimensions (not just the bounding rect)
+            const videoWidth = this.video.videoWidth || videoRect.width;
+            const videoHeight = this.video.videoHeight || videoRect.height;
+            
+            // Calculate the actual displayed size (accounting for CSS scaling)
+            const displayedWidth = videoRect.width;
+            const displayedHeight = videoRect.height;
+            
+            // Update display size based on actual rendered video size
+            this.displaySize = [displayedWidth, displayedHeight];
+            
+            // CRITICAL: Set canvas internal resolution to match CSS size exactly
+            // This prevents stretching and ensures pixel-perfect alignment
+            this.canvas.width = displayedWidth;
+            this.canvas.height = displayedHeight;
+            
+            // Set canvas CSS size to match video element exactly
+            this.canvas.style.width = displayedWidth + 'px';
+            this.canvas.style.height = displayedHeight + 'px';
+            
+            // Ensure canvas is positioned correctly (should already be absolute positioned)
+            this.canvas.style.position = 'absolute';
+            this.canvas.style.top = '8px';
+            this.canvas.style.left = '8px';
+            
+            console.log(`Canvas synced: ${displayedWidth}x${displayedHeight}, Original: ${this.originalSize[0]}x${this.originalSize[1]}`);
+            
+            // Redraw current frame with new size
+            if (this.bboxData) {
+                this.drawCurrentFrame();
+            }
+        }
     }
     
     updateFrameFromTime() {
@@ -286,9 +340,10 @@ class VesselTracker {
                 const textPadding = this.infoBoxParams.textPadding;
                 const buttonHeight = this.infoBoxParams.buttonHeight;
                 
-                contentHeight = textPadding + lineHeight + 4 + buttonHeight;
+                // Calculate height: padding + MMSI line + gap + button + (if expanded: gap + 4 more lines)
+                contentHeight = textPadding + lineHeight + 3 + buttonHeight;
                 if (isExpanded) {
-                    contentHeight += 8 + (lineHeight * 4);
+                    contentHeight += 6 + (lineHeight * 4); // Gap + 4 lines of data
                 }
                 contentHeight += textPadding;
             } else {
@@ -434,54 +489,80 @@ class VesselTracker {
         const finalX2 = finalX1 + this.infoBoxParams.width;
         const finalY2 = finalY1 + adjustedPos.height;
         
-        // Draw info panel background
+        // Draw translucent background for better readability
+        this.ctx.fillStyle = 'rgba(0, 0, 0, 0.75)'; // Dark translucent background
+        this.ctx.fillRect(finalX1, finalY1, finalX2 - finalX1, finalY2 - finalY1);
+        
+        // Draw info panel border
         this.ctx.strokeStyle = `rgb(${color[0]}, ${color[1]}, ${color[2]})`;
-        this.ctx.lineWidth = 1;
+        this.ctx.lineWidth = 2;
         this.ctx.strokeRect(finalX1, finalY1, finalX2 - finalX1, finalY2 - finalY1);
         
-        // Draw AIS data text with smaller font
-        this.ctx.fillStyle = `rgb(${color[0]}, ${color[1]}, ${color[2]})`;
-        this.ctx.font = '10px Arial';
-        let y = finalY1 + textPadding + lineHeight;
+        // Draw AIS data text with larger, bolder, darker font
+        this.ctx.fillStyle = '#ffffff'; // White text for contrast against dark background
+        this.ctx.font = 'bold 13px Arial';
+        this.ctx.textBaseline = 'top';
+        let y = finalY1 + textPadding;
         
-        // Always show MMSI
-        this.ctx.fillText(`MMSI: ${aisData.mmsi}`, finalX1 + textPadding, y);
+        // Always show MMSI (with proper spacing)
+        const mmsiText = `MMSI: ${aisData.mmsi}`;
+        // Check if text fits, if not, truncate or use smaller font
+        const maxTextWidth = this.infoBoxParams.width - (textPadding * 2);
+        this.ctx.fillText(mmsiText, finalX1 + textPadding, y);
         y += lineHeight;
         
         // Draw more/hide button below MMSI (centered, ensure it fits within box)
         const buttonWidth = Math.min(this.infoBoxParams.buttonWidth, this.infoBoxParams.width - (textPadding * 2));
-        const buttonX = finalX1 + textPadding + (this.infoBoxParams.width - (textPadding * 2) - buttonWidth) / 2;
-        const buttonY = y + 4;
+        let buttonX = finalX1 + textPadding + (this.infoBoxParams.width - (textPadding * 2) - buttonWidth) / 2;
+        const buttonY = y + 3; // Small gap after MMSI
         
-        // Button background
-        this.ctx.fillStyle = `rgba(${color[0]}, ${color[1]}, ${color[2]}, 0.2)`;
+        // Ensure button stays within box bounds
+        if (buttonX + buttonWidth > finalX2 - textPadding) {
+            // Adjust button position if it would overflow
+            const adjustedButtonX = finalX2 - textPadding - buttonWidth;
+            if (adjustedButtonX >= finalX1 + textPadding) {
+                buttonX = adjustedButtonX;
+            }
+        }
+        
+        // Button background with better visibility
+        this.ctx.fillStyle = `rgba(${color[0]}, ${color[1]}, ${color[2]}, 0.4)`;
         this.ctx.fillRect(buttonX, buttonY, buttonWidth, buttonHeight);
         
         // Button border
         this.ctx.strokeStyle = `rgb(${color[0]}, ${color[1]}, ${color[2]})`;
-        this.ctx.lineWidth = 1;
+        this.ctx.lineWidth = 1.5;
         this.ctx.strokeRect(buttonX, buttonY, buttonWidth, buttonHeight);
         
-        // Button text
-        this.ctx.fillStyle = `rgb(${color[0]}, ${color[1]}, ${color[2]})`;
-        this.ctx.font = '8px Arial';
+        // Button text (centered vertically and horizontally)
+        this.ctx.fillStyle = '#ffffff';
+        this.ctx.font = 'bold 11px Arial';
         this.ctx.textAlign = 'center';
+        this.ctx.textBaseline = 'middle';
         const buttonText = isExpanded ? 'Hide' : 'More';
-        this.ctx.fillText(buttonText, buttonX + buttonWidth / 2, buttonY + 10);
+        this.ctx.fillText(buttonText, buttonX + buttonWidth / 2, buttonY + buttonHeight / 2);
         this.ctx.textAlign = 'left';
+        this.ctx.textBaseline = 'top';
         
         // Show additional info below button only if expanded
         if (isExpanded) {
-            y = buttonY + buttonHeight + 8; // Position below button
-            this.ctx.fillStyle = `rgb(${color[0]}, ${color[1]}, ${color[2]})`;
-            this.ctx.font = '10px Arial';
-            this.ctx.fillText(`SOG: ${aisData.sog}`, finalX1 + textPadding, y);
-            y += lineHeight;
-            this.ctx.fillText(`COG: ${aisData.cog}`, finalX1 + textPadding, y);
-            y += lineHeight;
-            this.ctx.fillText(`LAT: ${aisData.lat}`, finalX1 + textPadding, y);
-            y += lineHeight;
-            this.ctx.fillText(`LON: ${aisData.lon}`, finalX1 + textPadding, y);
+            y = buttonY + buttonHeight + 6; // Position below button with spacing
+            this.ctx.fillStyle = '#ffffff';
+            this.ctx.font = 'bold 13px Arial';
+            this.ctx.textBaseline = 'top';
+            
+            // Draw each line with proper spacing and check for overflow
+            const lines = [
+                `SOG: ${aisData.sog}`,
+                `COG: ${aisData.cog}`,
+                `LAT: ${aisData.lat}`,
+                `LON: ${aisData.lon}`
+            ];
+            
+            for (const line of lines) {
+                this.ctx.fillText(line, finalX1 + textPadding, y);
+                y += lineHeight;
+            }
         }
     }
     
@@ -495,23 +576,29 @@ class VesselTracker {
         
         // Calculate dynamic box size for NO AIS (smaller box)
         const textPadding = this.infoBoxParams.textPadding;
-        const contentHeight = textPadding + 20 + textPadding; // Text height + padding
+        const contentHeight = textPadding + 25 + textPadding; // Text height + padding (increased for 16px font)
         
         // Use dynamic width and height
         const finalX2 = finalX1 + this.infoBoxParams.width;
         const finalY2 = finalY1 + contentHeight;
         
-        // Draw info panel background
+        // Draw translucent background for better readability
+        this.ctx.fillStyle = 'rgba(0, 0, 0, 0.75)'; // Dark translucent background
+        this.ctx.fillRect(finalX1, finalY1, finalX2 - finalX1, finalY2 - finalY1);
+        
+        // Draw info panel border
         this.ctx.strokeStyle = `rgb(${color[0]}, ${color[1]}, ${color[2]})`;
-        this.ctx.lineWidth = 1;
+        this.ctx.lineWidth = 2;
         this.ctx.strokeRect(finalX1, finalY1, finalX2 - finalX1, finalY2 - finalY1);
         
-        // Draw "NO AIS" text
-        this.ctx.fillStyle = `rgb(${color[0]}, ${color[1]}, ${color[2]})`;
-        this.ctx.font = 'bold 14px Arial';
+        // Draw "NO AIS" text with larger, bolder, darker font
+        this.ctx.fillStyle = '#ffffff'; // White text for contrast
+        this.ctx.font = 'bold 16px Arial';
         this.ctx.textAlign = 'center';
-        this.ctx.fillText('NO AIS', (finalX1 + finalX2) / 2, (finalY1 + finalY2) / 2 + 5);
+        this.ctx.textBaseline = 'middle';
+        this.ctx.fillText('NO AIS', (finalX1 + finalX2) / 2, (finalY1 + finalY2) / 2);
         this.ctx.textAlign = 'left';
+        this.ctx.textBaseline = 'top';
     }
     
     // updateStatus(message) {

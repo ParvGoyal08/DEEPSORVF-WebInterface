@@ -9,6 +9,7 @@
 <body>
     <div class="container">
         <h1>Interactive Vessel Tracking</h1>
+        <!-- <p class="subtitle">Click on vessels to view AIS information</p> -->
         
         <div class="video-container">
             <video id="video" controls preload="metadata">
@@ -20,18 +21,13 @@
         
         <div class="controls">
             <div class="info">
-                <!-- <p>Click on vessels to toggle AIS information display</p> -->
-                <!-- <p>Frame: <span id="frame-info">0</span> | Time: <span id="time-info">00:00</span></p> -->
+                <p>Use the controls below to manage vessel visibility</p>
             </div>
             <div class="visibility-controls">
                 <button id="show-all">Show All</button>
                 <button id="hide-all">Hide All</button>
             </div>
         </div>
-        
-        <!-- <div class="status">
-            <p id="status">Loading...</p>
-        </div> -->
     </div>
     
     <script src="/static/app.js"></script>
